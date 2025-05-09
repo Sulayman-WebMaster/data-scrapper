@@ -1,15 +1,29 @@
 const puppeteer = require('puppeteer');
 const XLSX = require('xlsx');
 const fs = require('fs');
+require('dotenv').config();
 
-// Load Excel file
+const FB_EMAIL = process.env.FB_EMAIL;
+const FB_PASSWORD = process.env.FB_PASSWORD;
+
 const workbook = XLSX.readFile('facebook_pages.xlsx');
 const sheet = workbook.Sheets[workbook.SheetNames[0]];
 const urls = XLSX.utils.sheet_to_json(sheet).map(row => row['Facebook Page']);
 
 (async () => {
-  const browser = await puppeteer.launch({ headless: false });
+  const browser = await puppeteer.launch({ headless: false, defaultViewport: null });
   const page = await browser.newPage();
+
+  // 🔐 LOGIN TO FACEBOOK
+  console.log("Logging in to Facebook...");
+  await page.goto('https://www.facebook.com/login', { waitUntil: 'networkidle2' });
+  await page.type('#email', FB_EMAIL, { delay: 50 });
+  await page.type('#pass', FB_PASSWORD, { delay: 50 });
+  await Promise.all([
+    page.click('[name="login"]'),
+    page.waitForNavigation({ waitUntil: 'networkidle2' })
+  ]);
+  console.log("✅ Logged in successfully");
 
   const results = [];
 
@@ -19,8 +33,7 @@ const urls = XLSX.utils.sheet_to_json(sheet).map(row => row['Facebook Page']);
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await page.waitForTimeout(5000);
 
-      // Try to find the "About" section if it exists
-      const aboutLink = await page.$x("//a[contains(., 'About')]");
+      const aboutLink = await page.$x("//a[contains(., 'About') or contains(., 'Info')]");
       if (aboutLink.length > 0) {
         await aboutLink[0].click();
         await page.waitForTimeout(3000);
@@ -47,7 +60,7 @@ const urls = XLSX.utils.sheet_to_json(sheet).map(row => row['Facebook Page']);
       });
 
     } catch (err) {
-      console.error(`Error on ${url}: ${err}`);
+      console.error(`❌ Error on ${url}: ${err}`);
       results.push({
         'Page URL': url,
         'Page Name': '',
@@ -60,7 +73,6 @@ const urls = XLSX.utils.sheet_to_json(sheet).map(row => row['Facebook Page']);
 
   await browser.close();
 
-  // Save to Excel
   const outputSheet = XLSX.utils.json_to_sheet(results);
   const outputBook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(outputBook, outputSheet, 'Results');
